@@ -375,6 +375,7 @@ PrivateData = @{
     )
 }
 ```
+
 PowerShell module components, such as `Import-Module` and module analysis,
 will be updated to incorporate this metadata to the resulted `PSModuleInfo` object.
 
@@ -445,6 +446,7 @@ PrivateData = @{
     }
 }
 ```
+
 correspondingly, a new property `Dependency` needs to be added to the type `ExperimentalFeature`:
 
 ```c#
