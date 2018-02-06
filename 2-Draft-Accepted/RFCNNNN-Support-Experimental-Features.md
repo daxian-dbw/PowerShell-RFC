@@ -56,6 +56,9 @@ For example:
 PSDomainSpecificLanguage
 PSFileSystemProviderV2
 ```
+> NOTE: Can external modules participate in an experimental feature defined by the engine or another external module? For the engine: If PowerShell class support were to support exporting a script class from a module, support tools, such as PSScriptAnalyzer would likely participate with experimental rules for these classes.
+
+> For external modules, an experimental module is published containing a cmdlet for retrieving metadata for image files. A contributor creates a cmdlet to enhance the output of the metadata cmdlet with additional information.
 
 Experimental features for a third-party PowerShell module should be named with
 the module name as the fully qualified namespace to reduce the chance of collision.
@@ -80,6 +83,7 @@ The `JSON` schema should look like this:
   ]
 }
 ```
+> NOTE: Should we consider reading experimental feature lists also from the per-user configuration file?
 
 PowerShell reads the experimental feature list from the configuration file only once when starting up.
 
@@ -88,6 +92,8 @@ PowerShell reads the experimental feature list from the configuration file only 
 - When creating a Runspace, PowerShell will check if the list has been read,
   and read the list if not yet.
   This is to make sure experimental features can be enabled when an application is hosting PowerShell.
+
+> NOTE: Current command-line parsing may make some experimental features difficult to flag due to the amount of work that occurs before parsing is completed. This is seen on Linux with Logging overrides.  It may be necessary to move parsing earlier in the startup call-path.
 
 Feature names from the list will be populated to a read-only immutable HashSet that is static to the whole process.
 The HashSet will be exposed to users via an API as well as an automatic variable.
@@ -124,7 +130,7 @@ We want to expose this cmdlet only if this experimental feature is enabled.
 
 An example for the second case:
 > We want to rewrite the `Invoke-WebRequest` cmdlet completely from scratch.
-We don't want to make changes directly to the existing code due to the risk of regression to the existing cmdelt.
+We don't want to make changes directly to the existing code due to the risk of regression to the existing cmdlet.
 Instead, we prefer to write new code from scratch in a new C# type
 and replace the existing `Invoke-WebRequest` when this experimental feature is enabled.
 
@@ -258,6 +264,8 @@ So a `Parameter` attribute can be associated with an experimental feature.
 When the experimental feature is enabled,
 PowerShell can choose to process or ignore the `Parameter` attribute depending on the `FeatureAction`.
 
+> NOTE: Can a parameter be marked with multiple experiment names? The use case is a new parameter that appears in 2 out of N parameter sets.
+
 The following code snippets are examples of using the new properties in a `Parameter` attribute:
 
 ```c#
@@ -308,6 +316,8 @@ As for the type members with the `[Experimental()]` attributes,
 [`TypeDefiner`](https://github.com/PowerShell/PowerShell/blob/master/src/System.Management.Automation/engine/parser/PSType.cs#L17) needs to be updated to process or skip a type member when processing a `TypeDefinitionAst` node,
 depending on whether the experimental feature is enabled and the `FeatureAction` value.
 
+> NOTE: When are errors generated, if any, if an experimental script function or class member is referenced, such as within a script module or within the class implementation?
+
 #### Exposed Public APIs
 
 An experimental feature may expose public C# APIs.
@@ -327,8 +337,11 @@ For experimental features in PowerShell engine,
 an internal enum `EngineExperimentalFeatures` will be used to track the names of all available engine experimental features.
 When adding a new experimental feature, its name needs to be added to the enum for the feature to be discoverable to users.
 The feature description needs to be added as a resource string,
-and the id of the resource string needs to be constructible from the feature name,
+and the id of the resource string needs to be constructed from the feature name,
 such as `XXX-Description` where `XXX` is the feature name.
+
+> NOTE: Do experimental features really need resource strings for the description?  They are not likely to be localized and it will simplify declaration since the name and description can be placed in a table as a single unit and avoid misnamed or missing description resources.
+
 Here is an example of the enum and a description resource string.
 
 ```c#
@@ -356,13 +369,12 @@ Here is an example:
 
 ```powershell
 PrivateData = @{
-    ExperimentalFeature = @{
-        Name = "PSWebCmdletV2"
-        Description = "Rewrite the web cmdlets for better performance"
-    }
+    ExperimentalFeatures = @(
+        @{Name = "PSWebCmdletV2", Description = "Rewrite the web cmdlets for better performance"}
+        @(Name = "PSRestCmdletV2", Description = "Rewrite the REST API cmdlets for better performance")
+    )
 }
 ```
-
 PowerShell module components, such as `Import-Module` and module analysis,
 will be updated to incorporate this metadata to the resulted `PSModuleInfo` object.
 
@@ -433,7 +445,6 @@ PrivateData = @{
     }
 }
 ```
-
 correspondingly, a new property `Dependency` needs to be added to the type `ExperimentalFeature`:
 
 ```c#
@@ -456,6 +467,27 @@ How to test the combination of various experimental features would be a hard pro
 as well as a problem that we have to solve before using the experimental feature support.
 
 > Not sure how to handle it yet ...
+
+### Experimental feature incompatibility mitigations
+There will be cases where experimental features are incompatible either intentionally or unintentionally.
+
+* An example of an intentional incompatibility occurs when two alternative, but incompatible solutions, are being tested.
+* An example of an unintended incompatibility can occur when two experimental features prove to be incompatible through usage.
+
+A minimal implementation will support defining a list of experimental feature pairs in the `powershell.config.json` file.  At startup, attempts to use incompatible features would produce warnings and consider both as disabled.
+
+An opportunistic implementation will support an exclusion value in the experimental feature declaration for cases where an author is intentionally providing alternative/incompatible implementations.
+
+### Static Code Analysis
+Static code analysis support should be provided to address experimental feature authoring. Two areas are particularily important:
+
+1: Validating an experimental feature is marked correctly.
+A use case for this occurs when an experimental feature is referenced in a module but not, or incorrectly defined in the manifest.  From a script perspective, a PSScriptAnalyzer rule would be a reasonable solution. For a compiled code perspective, a reflection-based tool may be needed.
+
+2: Validating references to an experimental feature have been removed.
+At some point, the experiment is completed and either removed from or incorporated into the code base. At this point, a tool to scan script or compiled code would be needed to ensure any references to the experiment have been removed.
+
+> NOTE: Will consumers require builds with no experimental code? If so, how to do we ensure this?
 
 ## Alternate Proposals and Considerations
 
