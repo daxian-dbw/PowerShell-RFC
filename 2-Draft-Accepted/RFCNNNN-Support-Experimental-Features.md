@@ -371,7 +371,7 @@ Here is an example:
 PrivateData = @{
     ExperimentalFeatures = @(
         @{Name = "PSWebCmdletV2", Description = "Rewrite the web cmdlets for better performance"}
-        @(Name = "PSRestCmdletV2", Description = "Rewrite the REST API cmdlets for better performance")
+        @{Name = "PSRestCmdletV2", Description = "Rewrite the REST API cmdlets for better performance"}
     )
 }
 ```
