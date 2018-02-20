@@ -56,8 +56,8 @@ For example:
 PSDomainSpecificLanguage
 PSFileSystemProviderV2
 ```
-> NOTE: Can external modules participate in an experimental feature defined by the engine or another external module? For the engine: If PowerShell class support were to support exporting a script class from a module, support tools, such as PSScriptAnalyzer would likely participate with experimental rules for these classes.
 
+> NOTE: Can external modules participate in an experimental feature defined by the engine or another external module? For the engine: If PowerShell class support were to support exporting a script class from a module, support tools, such as PSScriptAnalyzer would likely participate with experimental rules for these classes.
 > For external modules, an experimental module is published containing a cmdlet for retrieving metadata for image files. A contributor creates a cmdlet to enhance the output of the metadata cmdlet with additional information.
 
 Experimental features for a third-party PowerShell module should be named with
@@ -83,9 +83,11 @@ The `JSON` schema should look like this:
   ]
 }
 ```
+
 > NOTE: Should we consider reading experimental feature lists also from the per-user configuration file?
 
-PowerShell reads the experimental feature list from the configuration file only once when starting up.
+PowerShell reads the experimental feature list from the configuration file only once before the engine starts.
+So users cannot change experimental features at runtime.
 
 - For `pwsh`, the list will be read in `ConsoleHost` as soon as possible,
   so that experimental features targeting the `ConsoleHost` can be turned on early enough.
@@ -334,31 +336,25 @@ including the ones in the PowerShell engine as well as the ones from modules.
 #### PowerShell Engine Experimental Feature
 
 For experimental features in PowerShell engine,
-an internal enum `EngineExperimentalFeatures` will be used to track the names of all available engine experimental features.
-When adding a new experimental feature, its name needs to be added to the enum for the feature to be discoverable to users.
-The feature description needs to be added as a resource string,
-and the id of the resource string needs to be constructed from the feature name,
-such as `XXX-Description` where `XXX` is the feature name.
-
-> NOTE: Do experimental features really need resource strings for the description?  They are not likely to be localized and it will simplify declaration since the name and description can be placed in a table as a single unit and avoid misnamed or missing description resources.
-
-Here is an example of the enum and a description resource string.
+an internal static read-only collection `EngineExperimentalFeatures` will be used to track all available engine experimental features.
+The items in the collection are of the type `ExperimentalFeature`, whose definition looks as follows:
 
 ```c#
-internal enum EngineExperimentalFeatures
+public class ExperimentalFeature
 {
-    None,
-    PSDomainSpecificLanguage,
-    PSFileSystemProviderV2
+    // Feature name
+    public string Name { get; }
+    // Feature description
+    public string Description { get; }
+    // Feature source (e.g. PSEngine, or module name)
+    public string Source { get; }
 }
+
+internal static readonly ReadOnlyCollection<ExperimentalFeature> EngineExperimentalFeatures;
 ```
 
-```xml
-// EngineExperimentalFeature.resx
-<data name="PSFileSystemProviderV2-Description" xml:space="preserve">
-  <value>Rewrite file system provider for better performance.</value>
-</data>
-```
+When adding a new experimental feature, an instance representing the feature needs to be added to the collection for it to be discoverable to users.
+The `Source` for engine experimental features should be specified as `PSEngine`.
 
 #### Module Experimental Feature
 
@@ -382,23 +378,9 @@ will be updated to incorporate this metadata to the resulted `PSModuleInfo` obje
 #### Get-ExperimentalFeature
 
 A new cmdlet `Get-ExperimentalFeature` will be added to return all available experimental features of a PowerShell session.
-The returned experimental features are represented by the type `ExperimentalFeature`,
-whose definition looks as follows:
+The returned experimental features are represented by the type [`ExperimentalFeature`](#PowerShell-Engine-Experimental-Feature).
 
-```c#
-public class ExperimentalFeature
-{
-    // Feature name
-    public string Name { get; }
-    // Feature description
-    public string Description { get; }
-    // Feature source (e.g. module name)
-    public string Source { get; }
-}
-```
-
-The cmdlet first goes through the enum members of `EngineExperimentalFeatures` to find all engine experimental features.
-For each of them, the description resource string will be retrieved and the `Source` will be set as `PSEngine`.
+The cmdlet first goes through the items in `EngineExperimentalFeatures` to find all engine experimental features.
 
 Then the cmdlet goes through all loaded modules and get the available experimental features from each module.
 For each of them, the `Name` and `Description` are from the metadata. The `Source` will be the module name.
@@ -470,24 +452,32 @@ as well as a problem that we have to solve before using the experimental feature
 
 > Not sure how to handle it yet ...
 
-### Experimental feature incompatibility mitigations
+### Experimental Feature Incompatibility Mitigation
+
 There will be cases where experimental features are incompatible either intentionally or unintentionally.
 
-* An example of an intentional incompatibility occurs when two alternative, but incompatible solutions, are being tested.
-* An example of an unintended incompatibility can occur when two experimental features prove to be incompatible through usage.
+- An example of an intentional incompatibility occurs when two alternative, but incompatible solutions, are being tested.
+- An example of an unintended incompatibility can occur when two experimental features prove to be incompatible through usage.
 
-A minimal implementation will support defining a list of experimental feature pairs in the `powershell.config.json` file.  At startup, attempts to use incompatible features would produce warnings and consider both as disabled.
+A minimal implementation will support defining a list of experimental feature pairs in the `powershell.config.json` file.
+At startup, attempts to use incompatible features would produce warnings and consider both as disabled.
 
-An opportunistic implementation will support an exclusion value in the experimental feature declaration for cases where an author is intentionally providing alternative/incompatible implementations.
+An opportunistic implementation will support an exclusion value in the experimental feature declaration
+for cases where an author is intentionally providing alternative/incompatible implementations.
 
 ### Static Code Analysis
-Static code analysis support should be provided to address experimental feature authoring. Two areas are particularily important:
 
-1: Validating an experimental feature is marked correctly.
-A use case for this occurs when an experimental feature is referenced in a module but not, or incorrectly defined in the manifest.  From a script perspective, a PSScriptAnalyzer rule would be a reasonable solution. For a compiled code perspective, a reflection-based tool may be needed.
+Static code analysis support should be provided to address experimental feature authoring.
+Two areas are particularly important:
 
-2: Validating references to an experimental feature have been removed.
-At some point, the experiment is completed and either removed from or incorporated into the code base. At this point, a tool to scan script or compiled code would be needed to ensure any references to the experiment have been removed.
+1. Validating whether an experimental feature is marked correctly.
+   A use case for this occurs when an experimental feature is referenced in a module but not, or incorrectly defined in the manifest.
+   From a script perspective, a `PSScriptAnalyzer` rule would be a reasonable solution.
+   From a compiled code perspective, a reflection-based tool may be needed.
+
+2. Validating whether references to an non-existing experimental feature have been removed.
+   At some point, the experiment is completed and either removed from or incorporated into the code base.
+   At this point, a tool to scan script or compiled code would be needed to ensure any references to the experiment have been removed.
 
 > NOTE: Will consumers require builds with no experimental code? If so, how to do we ensure this?
 
